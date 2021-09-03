@@ -37,16 +37,21 @@ class Painting(BaseModel):
     painting: Optional[Any]
 
 
-def get_trapezoid(height, width, ratio):
+def get_trapezoid(height, width, ratio, num_paintings):
 
-    painting_height_1 = randint(min_painting_height, max_painting_height)
+    max_height = max_painting_height / num_paintings * 2
+    max_width = min(width, max_painting_width)
+    max_width = max_width / num_paintings * 2
+
+    painting_height_1 = randint(min_painting_height, max_height)
     painting_height_2 = int(painting_height_1 * ratio)
+    painting_height_2 = min(height, painting_height_2)
     longer_height = max(painting_height_1, painting_height_2)
 
-    painting_width = randint(min_painting_width, min(width, max_painting_width))
+    painting_width = randint(min_painting_width, max_width)
 
-    start_left = randint(10, width - painting_width - 10)
-    start_top = randint(10, height - longer_height - 10)
+    start_left = randint(10, width - painting_width)
+    start_top = randint(10, height - longer_height)
 
     mid_height = start_top + longer_height / 2
 
@@ -98,7 +103,7 @@ for i in range(num_columns):
 
     for j in range(num_paintings):
         for attempt in range(20):
-            trapezoid = get_trapezoid(height, col_with, perspective_ratio)
+            trapezoid = get_trapezoid(height, col_with, perspective_ratio, num_paintings)
             if not overlaps(trapezoid, trapezoids):
                 trapezoids.append(trapezoid)
                 break
