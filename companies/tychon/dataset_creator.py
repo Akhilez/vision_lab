@@ -1,3 +1,5 @@
+from datetime import datetime
+from os import makedirs
 from random import randint, random
 from typing import Optional, Any, Tuple
 
@@ -30,17 +32,22 @@ from companies.tychon.rotate_3d import rotate_y
 
 
 def generate_dataset(count=10, height=448, width=448):
+    makedirs('./data/images', exist_ok=True)
+    makedirs('./data/masks', exist_ok=True)
     for image_i in range(count):
         num_columns = randint(1, 3)
 
-        image = np.zeros((4, height, width))
+        image = np.zeros((4, height, width), dtype=np.uint8)
         col_width = width // num_columns
 
         for column_i in range(num_columns):
             start_x = column_i * col_width
             end_x = start_x + col_width
             section = image[:, :, start_x: end_x]
-            section[:] = randint(0, 255)
+
+            section[0] = randint(200, 255)
+            section[1] = randint(200, 255)
+            section[2] = randint(200, 255)
 
             n_rows = randint(1, 4)
             n_cols = randint(1, 2)
@@ -75,16 +82,39 @@ def generate_dataset(count=10, height=448, width=448):
             is_angled = random() > 1 / 3
             if is_angled:
                 degree = randint(10, 60)
+
+                is_negative_angle = random() > 0.5
+                if is_negative_angle:
+                    degree *= -1
+
                 section_ = np.moveaxis(section, 0, -1)
                 rotated = rotate_y(section_, degree)
                 section_[:] = rotated[:]
 
-        plt.imshow(image[0])
-        plt.show()
+        # plt.imshow(image[0], cmap='gray')
+        # plt.show()
+        save_image_mask(np.moveaxis(image[:3], 0, -1), image[3])
 
 
-def get_random_painting(height, width):
-    return np.ones((3, height, width)) * randint(0, 255)
+def save_image_mask(image, mask):
+    id = datetime.now().timestamp()
+
+    im = Image.fromarray(image)
+    im.save(f'./data/images/{id}.png')
+
+    im = Image.fromarray(mask)
+    im.save(f'./data/masks/{id}.png')
+
+
+def get_random_painting(h, w):
+    return np.ones((3, h, w)) * randint(0, 255)
+    url = 'https://loremflickr.com/480/320/painting'
+    img = Image.open(requests.get(url, stream=True).raw)
+    img = img.convert('RGB')
+    img = np.array(img, dtype=np.uint8)
+    img = cv2.resize(img, (w, h))
+    img = np.moveaxis(img, -1, 0)
+    return img
 
 
 def get_random_frame_in_cell(cell_h, cell_w, min_h, min_w, padding) -> Tuple[int, int, int, int]:
@@ -105,4 +135,4 @@ def get_random_frame_in_cell(cell_h, cell_w, min_h, min_w, padding) -> Tuple[int
     return x1, y1, x2, y2
 
 
-generate_dataset(5, height=300, width=500)
+generate_dataset(25, height=320, width=448)
