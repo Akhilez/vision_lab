@@ -1,23 +1,19 @@
 from datetime import datetime
 from os import makedirs
 from random import randint, random
-from typing import Optional, Any, Tuple
-
+from typing import Tuple
 import cv2
 import numpy as np
 import requests
-from matplotlib import pyplot as plt
-from pydantic import BaseModel
 from PIL import Image
+from rotate_3d import rotate_y
 
+# https://loremflickr.com/1280/720/painting
 
 # 160 224
 # 320 448
 # 480 672
 # 640 896
-
-# https://loremflickr.com/1280/720/painting
-from companies.tychon.rotate_3d import rotate_y
 
 """
 - Divide the image into 1-3 columns

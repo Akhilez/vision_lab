@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from torch.nn import functional as F
+from model import PaintingModel
 from metrics import SegmentationMetrics
 from dataset import load_image_paths, PaintingsDataset
 from torchvision import transforms
@@ -35,7 +36,7 @@ def evaluate_dataset(model, data_loader, metrics, seg_criterion):
 
         metrics.step_batch(
             masks_true=masks,
-            mask_pred=pred_masks,
+            masks_pred=pred_masks,
             loss=float(loss),
         )
     scores = metrics.step_epoch()
@@ -73,7 +74,7 @@ def main():
         'data_path': './data',
         'valset_size': 0.1,
         'epochs': 10,
-        'batch_size': 16,
+        'batch_size': 2,
         'learning_rate': {
             'initial': 0.0001,
             'decay_every': 30,
@@ -83,18 +84,18 @@ def main():
     }
     makedirs(join(cfg['output_path'], "checkpoints"), exist_ok=True)
     logger = SummaryWriter()
-    metrics = SegmentationMetrics()
+    metrics = SegmentationMetrics(num_classes=2)
 
     # -------------- model ---------------
 
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet101', pretrained=True)
+    model = PaintingModel()
 
     if cfg.get('checkpoint'):
         model.load(cfg['checkpoint'])
     model = model.float().to(device)
 
     optimizer = torch.optim.Adam(
-        model.decoder_parameters(), lr=cfg['learning_rate']['initial']
+        model.parameters(), lr=cfg['learning_rate']['initial']
     )
     lr_scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer,
@@ -146,7 +147,7 @@ def main():
 
                     batch_metrics = metrics.step_batch(
                         masks_true=masks,
-                        mask_pred=pred_masks,
+                        masks_pred=pred_masks,
                         loss=float(loss),
                         learning_rate=float(lr_scheduler.get_last_lr()[0]),
                     )
