@@ -15,6 +15,7 @@ from PIL import Image
 # 640 896
 
 # https://loremflickr.com/1280/720/painting
+from companies.tychon.rotate_3d import rotate_y
 
 """
 - Divide the image into 1-3 columns
@@ -41,7 +42,7 @@ def generate_dataset(count=10, height=448, width=448):
             section = image[:, :, start_x: end_x]
             section[:] = randint(0, 255)
 
-            n_rows = randint(1, 3)
+            n_rows = randint(1, 4)
             n_cols = randint(1, 2)
 
             cell_h = height // n_rows
@@ -49,7 +50,7 @@ def generate_dataset(count=10, height=448, width=448):
 
             for row_i in range(n_rows):
                 for col_i in range(n_cols):
-                    dont_include = random() > 1
+                    dont_include = random() > 0.8
                     if dont_include:
                         continue
 
@@ -73,11 +74,13 @@ def generate_dataset(count=10, height=448, width=448):
 
             is_angled = random() > 1 / 3
             if is_angled:
-                degree = randint(1, 30)
-                # TODO: Do the rotation.
+                degree = randint(10, 60)
+                section_ = np.moveaxis(section, 0, -1)
+                rotated = rotate_y(section_, degree)
+                section_[:] = rotated[:]
 
-            plt.imshow(image[0])
-            plt.show()
+        plt.imshow(image[0])
+        plt.show()
 
 
 def get_random_painting(height, width):
@@ -102,4 +105,4 @@ def get_random_frame_in_cell(cell_h, cell_w, min_h, min_w, padding) -> Tuple[int
     return x1, y1, x2, y2
 
 
-generate_dataset(5, height=50, width=50)
+generate_dataset(5, height=300, width=500)
