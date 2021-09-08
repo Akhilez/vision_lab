@@ -1,7 +1,6 @@
 from os import listdir
 from os.path import join
 from random import randint
-
 import cv2
 import numpy as np
 import requests
