@@ -13,6 +13,13 @@ I also tried a deep learning approach with synthetic data - seen in `experiment_
 ### Takeaways
 
 This was a fun problem.
+
+The solution fails for few paintings. Does not pick up a painting or picks it imperfectly.
+
+It also does not retain the frame of the painting.
+
+### Future Improvements
+
 I think the classical approach can be further optimized with creative methods and hyper params tuning.
 
 The deep learning approach can be significantly improved by
