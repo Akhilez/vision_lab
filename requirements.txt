@@ -40,3 +40,5 @@ moviepy==1.0.3
 imageio
 pycocotools
 albumentations
+torchmetrics
+pytorch-lightning
