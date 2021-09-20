@@ -236,7 +236,7 @@ class MnistModel(pl.LightningModule):
 def main():
 
     hp = {
-        "epochs": 100,
+        "epochs": 10,
         "lr_initial": 0.0001,
         "lr_decay_every": 30,
         "lr_decay_by": 0.3,
