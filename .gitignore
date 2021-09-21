@@ -18,6 +18,8 @@ output/
 multirun/
 wandb/
 
+temp.*
+
 ### OSX ###
 .AppleDouble
 .LSOverride
