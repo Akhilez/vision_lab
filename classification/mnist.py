@@ -1,3 +1,14 @@
+"""
+This is image classification with few good practices.
+
+Uses the following frameworks:
+
+- PyTorch Lightning
+- TorchMetrics
+-
+"""
+
+
 from typing import Optional, List, Union
 import cv2
 import numpy as np
@@ -7,7 +18,10 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from torch import nn
 from torch.utils.data import random_split, DataLoader
+from torchmetrics import AverageMeter
 from torchvision.datasets import MNIST
+from pytorch_lightning.loggers import WandbLogger
+from torch.nn import functional as F
 
 
 class MnistDataset(pl.LightningDataModule):
@@ -17,6 +31,7 @@ class MnistDataset(pl.LightningDataModule):
         data_path: str,
         val_split: float,
         dataloader_num_workers: int = 0,
+        manual_seed=None,
         **_,
     ):
         super().__init__()
@@ -29,6 +44,7 @@ class MnistDataset(pl.LightningDataModule):
         self.batch_size = batch_size
         self.val_split = val_split
         self.num_workers = dataloader_num_workers
+        self.manual_seed = manual_seed
 
         self.transform_train_val, self.transform_test = self._get_transforms()
 
@@ -50,12 +66,17 @@ class MnistDataset(pl.LightningDataModule):
             mnist_full = MNIST(
                 self.data_path, train=True, transform=self.transform_train_val
             )
+
             full_size = len(mnist_full)
             val_size = int(full_size * self.val_split)
+            generator = None
+            if self.manual_seed:
+                generator = torch.Generator().manual_seed(self.manual_seed)
+
             self.mnist_train, self.mnist_val = random_split(
                 mnist_full,
                 [full_size - val_size, val_size],
-                generator=torch.Generator().manual_seed(42),
+                generator=generator,
             )
 
         # Assign test dataset for use in dataloader(s)
@@ -89,33 +110,28 @@ class MnistDataset(pl.LightningDataModule):
         )
 
     def _get_transforms(self):
-        resize_transform = A.Compose(
-            [
-                A.PadIfNeeded(
-                    min_height=self.h, min_width=self.w, border_mode=cv2.BORDER_CONSTANT
-                ),
-                A.RandomCrop(self.h, self.w),
-            ]
-        )
-        augmentations = A.Compose(
-            [
-                A.HorizontalFlip(p=0.5),
-                A.RandomBrightnessContrast(p=0.2),
-            ]
-        )
+        resize_transform: list = [
+            A.PadIfNeeded(
+                min_height=self.h, min_width=self.w, border_mode=cv2.BORDER_CONSTANT
+            ),
+            A.RandomCrop(self.h, self.w),
+        ]
+
+        augmentations: list = [
+            A.HorizontalFlip(p=0.5),
+            A.RandomBrightnessContrast(p=0.2),
+        ]
 
         def _normalizer(image, **_):
             return image / 255.0
 
-        compatible = A.Compose(
-            [
-                ToTensorV2(always_apply=True),
-                A.Lambda(image=_normalizer),
-            ]
-        )
+        compatible: list = [
+            ToTensorV2(always_apply=True),
+            A.Lambda(image=_normalizer),
+        ]
 
-        transforms_train_val_ = A.Compose([resize_transform, augmentations, compatible])
-        transforms_test_ = A.Compose([resize_transform, compatible])
+        transforms_train_val_ = A.Compose(resize_transform + compatible)
+        transforms_test_ = A.Compose(resize_transform + compatible)
 
         def transforms_train_val(image):
             return transforms_train_val_(image=np.array(image))["image"]
@@ -124,6 +140,9 @@ class MnistDataset(pl.LightningDataModule):
             return transforms_test_(image=np.array(image))["image"]
 
         return transforms_train_val, transforms_test
+
+
+# %%
 
 
 class CNNBlock(nn.Module):
@@ -178,6 +197,9 @@ class SimpleCNN(nn.Module):
         return self.model(x)
 
 
+# %%
+
+
 class MnistModel(pl.LightningModule):
     def __init__(self, **hp):
         super().__init__()
@@ -189,51 +211,95 @@ class MnistModel(pl.LightningModule):
             "M",
             (3, 40, 1, 1),
             # "M",
-            (3, 80, 1, 1),
+            # (3, 80, 1, 1),
             (3, 10, 1, 0),
         ]
 
         self.model = nn.Sequential(
             SimpleCNN(architecture, in_channels=1),
-            nn.AvgPool2d(kernel_size=5),
+            nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
         )
 
         self.hp = hp
         self.save_hyperparameters(hp)
 
-        self.criterion = nn.CrossEntropyLoss()
+        # Metrics
+        self.accuracy_train = pl.metrics.Accuracy()
+        self.accuracy_val = pl.metrics.Accuracy()
+        self.loss_train = AverageMeter()
+        self.loss_val = AverageMeter()
 
     def forward(self, x):
         return self.model(x)
 
+    def _criterion(self, preds, targets):
+        return F.nll_loss(F.softmax(preds, dim=1), targets)
+
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        return torch.optim.Adam(self.parameters(), lr=self.hp["lr_initial"])
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
+        images, targets = batch
+        preds = self(images)
+        loss = self._criterion(preds, targets)
+        return {
+            "loss": loss,
+            "preds": preds.detach(),
+            "inputs": images,
+            "targets": targets,
+        }
 
-        self.log("train/loss", loss, on_epoch=True)
-        return loss
+    def training_step_end(self, outs: dict):
+        self.loss_train(outs["loss"])
+        self.accuracy_train(outs["preds"], outs["targets"])
+        self.log("train/step/accuracy", self.accuracy_train, prog_bar=True)
+
+    def training_epoch_end(self, outs: dict):
+        self.log("train/epoch/accuracy", self.accuracy_train.compute())
+        self.log("train/epoch/loss", self.loss_train.compute())
 
     def validation_step(self, batch, batch_idx):
-        return self._evaluate(batch, batch_idx, "val")
+        images, targets = batch
+        preds = self(images)
+        loss = loss = self._criterion(preds, targets)
+        return {
+            "loss": loss,
+            "preds": preds.detach(),
+            "inputs": images,
+            "targets": targets,
+        }
 
-    def test_step(self, batch, batch_idx):
-        return self._evaluate(batch, batch_idx, "test")
+    def validation_step_end(self, outs: dict):
+        self.accuracy_val(outs["preds"], outs["targets"])
+        self.loss_val(outs["loss"])
 
-    def _evaluate(self, batch, batch_idx, prefix: str):
-        x, y = batch
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-
-        self.log(f"{prefix}/loss", loss, on_epoch=True)
-        return loss
+    def on_validation_epoch_end(self) -> None:
+        self.log("val/epoch/accuracy", self.accuracy_val.compute())
+        self.log("val/epoch/loss", self.loss_val.compute())
+        self.loss_val.reset()
 
 
-def main():
+# %%
+
+
+def debug1():
+    config = {
+        "data_path": "../data",
+        "val_split": 0.3,
+        "batch_size": 2,
+        "output_path": "./output",
+        "model_save_frequency": 5,
+        "dataloader_num_workers": 0,
+    }
+    dataset = MnistDataset(**config)
+
+    dataset.prepare_data()
+    dataset.setup()
+    loader = dataset.train_dataloader()
+    for image, classes in loader:
+        print(image.shape, classes.shape)
+        break
 
     hp = {
         "epochs": 10,
@@ -241,11 +307,30 @@ def main():
         "lr_decay_every": 30,
         "lr_decay_by": 0.3,
     }
+    model = MnistModel(**hp, **config)
+    y = model(image)
+    print(y.shape)
+
+
+# debug1()
+
+
+# %%
+
+
+def train():
+    hp = {
+        "epochs": 10,
+        "lr_initial": 0.001,
+        "lr_decay_every": 30,
+        "lr_decay_by": 0.3,
+    }
 
     config = {
         "data_path": "../data",
-        "val_split": 0.3,
+        "val_split": 0.05,
         "batch_size": 64,
+        "manual_seed": 2,
         "output_path": "./output",
         "model_save_frequency": 5,
         "dataloader_num_workers": 0,
@@ -253,28 +338,17 @@ def main():
 
     dataset = MnistDataset(**config)
     model = MnistModel(**hp, **config)
+    wandb_logger = WandbLogger(project="classification_test", log_model=True)
     trainer = pl.Trainer(
         gpus=0,
         max_epochs=hp["epochs"],
         default_root_dir=config["output_path"],
+        logger=wandb_logger,
     )
+    wandb_logger.watch(model)
 
     trainer.fit(model, datamodule=dataset)
 
 
-def test_modules():
-    dataset = MnistDataset(batch_size=2)
-    dataset.prepare_data()
-    dataset.setup()
-    loader = dataset.train_dataloader()
-    for image, classes in loader:
-        print(image.shape, classes)
-        break
-
-    model = MnistModel()
-    y = model(image)
-    print(y.shape)
-
-
 if __name__ == "__main__":
-    main()
+    train()
