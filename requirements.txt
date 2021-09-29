@@ -42,6 +42,7 @@ pycocotools
 albumentations
 torchmetrics
 pytorch-lightning
+torchsummary
 
 numpy~=1.21.2
 opencv-python~=4.5.1.48
