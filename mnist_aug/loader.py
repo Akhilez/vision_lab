@@ -1,5 +1,5 @@
 from torch.utils.data import Dataset
-from mnist_aug.mnist_augmenter import MNISTAug, DataManager
+from mnist_aug.mnist_augmenter import MNISTAug, MnistAugDataManager
 
 
 class MNISTAugDataset(Dataset):
@@ -23,7 +23,7 @@ class MNISTAugDataset(Dataset):
         All params are same as params of aug.get_augmented()
 
         Every data points is a tuple of
-        - image of shape (1, 112, 112)
+        - np.ndarray of shape (1, 112, 112)
         - List[Dict[str, Any]] of the format:
             {
                 'class': int,
@@ -40,7 +40,7 @@ class MNISTAugDataset(Dataset):
 
         A default collate_fn will fail because there are uneven number of bboxes per image.
         """
-        self.data_manager = DataManager()
+        self.data_manager = MnistAugDataManager()
         self.data_manager.load()
 
         self.aug = aug if aug is not None else MNISTAug()
@@ -63,7 +63,7 @@ class MNISTAugDataset(Dataset):
         return self.n_out
 
     def __getitem__(self, idx):
-        return self.aug.get_augmented(
+        x, y = self.aug.get_augmented(
             self.x,
             self.y,
             n_out=1,
@@ -74,10 +74,11 @@ class MNISTAugDataset(Dataset):
             get_positional_relationships=self.get_positional_relationships,
             get_relationship_captions=self.get_relationship_captions,
         )
+        return x, y[0]
 
 
 if __name__ == "__main__":
     dataset = MNISTAugDataset(n_out=10)
     x, y = next(iter(dataset))
     print(x.shape)
-    print(y[0])
+    print(y)

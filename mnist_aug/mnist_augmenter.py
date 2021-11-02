@@ -197,7 +197,9 @@ class MNISTAug:
             box["position"] = MNISTAug.get_number_position(
                 box["x1"], box["y1"], box["x2"], box["y2"]
             )
-            box["position_one_hot"] = DataManager.to_one_hot([box["position"]], 9)
+            box["position_one_hot"] = MnistAugDataManager.to_one_hot(
+                [box["position"]], 9
+            )
 
         return boxes
 
@@ -408,14 +410,16 @@ class MNISTAug:
         return False
 
 
-class DataManager:
+class MnistAugDataManager:
     def __init__(self):
         self.dir = f"{BASE_DIR}/data"
         self.x_train, self.y_train, self.x_test, self.y_test = None, None, None, None
 
-    def load(self):
-        self.load_train()
-        self.load_test()
+    def load(self, train=None):
+        if train is None or train:
+            self.load_train()
+        if train is None or not train:
+            self.load_test()
 
     def load_train(self):
         dataset = torchvision.datasets.MNIST(
