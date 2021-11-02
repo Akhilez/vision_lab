@@ -1,15 +1,14 @@
-import os
 import random
-
 import numpy as np
 from skimage.transform import resize
-
-from lib.mnist_aug import caption_rules
+from mnist_aug import caption_rules
+from settings import BASE_DIR
+import torch
+import torchvision
 
 
 class MNISTAug:
     def __init__(self):
-        self.dm = DataManager()
 
         self.scale = 4  # height(out_img) / height(in_image)
         self.overflow = 0.3  # An in_image can't overflow more than 50% out of the image
@@ -37,11 +36,10 @@ class MNISTAug:
         get_relationship_captions: bool = False,
     ):
         """
-
         Parameters
         ----------
-        x: a tensor of shape [1000, 28, 28]
-        y: a tensor of shape [1000, 1]
+        x: a tensor of shape [n, 28, 28]
+        y: a tensor of shape [n, 1]
         n_out: number of output images
         noisy: bool: will add patchy perlin noise to the image # TODO: Lets add some noise to the image
         get_class_captions: bool: will return captions for each number in the image
@@ -52,20 +50,19 @@ class MNISTAug:
 
         Returns
         -------
-        aug_x: np.ndarray: a tensor of shape [1000, 112, 112]
+        aug_x: np.ndarray: a tensor of shape [n, 28*scale, 28*scale]
         aug_y: list of list of dicts: [[{
-                    'class': int(np.argmax(y[rand_i])),
-                    'class_one_hot': y[rand_i],
-                    'x1': rand_x,
-                    'y1': rand_y,
-                    'x2': rand_x + localized_dim_x,
-                    'y2': rand_y + localized_dim_y,
-                    'cx': rand_x + localized_dim_x / 2,
-                    'cy': rand_y + localized_dim_y / 2,
-                    'height': localized_dim_y,
-                    'width': localized_dim_x
+                    'class': int,
+                    'class_one_hot': List[int],
+                    'x1': int,
+                    'y1': int,
+                    'x2': int,
+                    'y2': int,
+                    'cx': float,
+                    'cy': float,
+                    'height': int,
+                    'width': int,
                 }]]
-
         """
 
         # x_out = width of output image
@@ -131,11 +128,14 @@ class MNISTAug:
                     rand_x : rand_x + localized_dim_x, rand_y : rand_y + localized_dim_y
                 ] += localized_xi
 
+                y_one_hot = np.zeros(10, dtype=np.int)
+                y_one_hot[y[rand_i]] = 1
+
                 aug_yi.append(
                     {
                         "id": j,
-                        "class": int(np.argmax(y[rand_i])),
-                        "class_one_hot": y[rand_i],
+                        "class": int(y[rand_i]),
+                        "class_one_hot": y_one_hot.tolist(),
                         "x1": rand_x,
                         "y1": rand_y,
                         "x2": rand_x + localized_dim_x,
@@ -197,7 +197,9 @@ class MNISTAug:
             box["position"] = MNISTAug.get_number_position(
                 box["x1"], box["y1"], box["x2"], box["y2"]
             )
-            box["position_one_hot"] = DataManager.to_one_hot([box["position"]], 9)
+            box["position_one_hot"] = MnistAugDataManager.to_one_hot(
+                [box["position"]], 9
+            )
 
         return boxes
 
@@ -408,77 +410,46 @@ class MNISTAug:
         return False
 
 
-class DataManager:
+class MnistAugDataManager:
     def __init__(self):
-        from settings import BASE_DIR
-
-        self.dir = f"{BASE_DIR}/data/mnist/numbers"
-
+        self.dir = f"{BASE_DIR}/data"
         self.x_train, self.y_train, self.x_test, self.y_test = None, None, None, None
 
-    def load(self):
-        self.load_train()
-        self.load_test()
+    def load(self, train=None):
+        if train is None or train:
+            self.load_train()
+        if train is None or not train:
+            self.load_test()
 
     def load_train(self):
-        if os.path.exists(self.dir + "/x_train.npy"):
-            self.x_train = np.load(f"{self.dir}/x_train.npy")
-            self.y_train = np.load(f"{self.dir}/y_train.npy")
-        else:
-            self.load_train_from_torch()
+        dataset = torchvision.datasets.MNIST(
+            self.dir,
+            train=True,
+            download=True,
+            transform=torchvision.transforms.ToTensor(),
+        )
+        xs, ys = [], []
+        for x, y in dataset:
+            xs.append(x)
+            ys.append(y)
+
+        self.x_train = torch.stack(xs).squeeze(1)
+        self.y_train = torch.tensor(ys)
 
     def load_test(self):
-        if os.path.exists(self.dir + "/x_test.npy"):
-            self.x_test = np.load(f"{self.dir}/x_test.npy")
-            self.y_test = np.load(f"{self.dir}/y_test.npy")
-        else:
-            self.load_test_from_torch()
-
-    def load_train_from_torch(self):
-        import torch
-        import torchvision
-
-        train_loader = torch.utils.data.DataLoader(
-            torchvision.datasets.MNIST(
-                self.dir,
-                train=True,
-                download=True,
-                transform=torchvision.transforms.ToTensor(),
-            ),
-            shuffle=True,
+        dataset = torchvision.datasets.MNIST(
+            self.dir,
+            train=False,
+            download=True,
+            transform=torchvision.transforms.ToTensor(),
         )
-        x_train = []
-        y_train = []
+        xs, ys = [], []
+        for x, y in dataset:
+            xs.append(x)
+            ys.append(y)
 
-        for data in train_loader:
-            x_train.append(data[0].reshape(28, 28).numpy())
-            y_train.append(data[1][0])
-
-        self.y_train = torch.tensor(self.to_one_hot(y_train))
-        self.x_train = torch.tensor(x_train)
-
-    def load_test_from_torch(self):
-        import torch
-        import torchvision
-
-        test_loader = torch.utils.data.DataLoader(
-            torchvision.datasets.MNIST(
-                self.dir,
-                train=False,
-                download=True,
-                transform=torchvision.transforms.ToTensor(),
-            ),
-            shuffle=True,
-        )
-        x_test = []
-        y_test = []
-
-        for data in test_loader:
-            x_test.append(data[0].reshape(28, 28).numpy())
-            y_test.append(data[1][0])
-
-        self.y_test = torch.tensor(self.to_one_hot(y_test))
-        self.x_test = torch.tensor(x_test)
+        self.x_test = torch.stack(xs).squeeze(1)
+        self.y_test = torch.tensor(ys)
 
     @staticmethod
     def plot_num(x, bounding_boxes: list = None):
