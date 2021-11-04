@@ -103,6 +103,7 @@ class YoloV1PL(pl.LightningModule):
             "preds": preds.detach(),
             "losses": losses,
             "batch_index": batch_index,
+            "loss": losses["loss"],
         }
 
     def training_step_end(self, outputs: dict):

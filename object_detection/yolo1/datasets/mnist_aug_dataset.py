@@ -5,7 +5,7 @@ import numpy as np
 import yaml
 from PIL import Image
 from albumentations.pytorch import ToTensorV2
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 from object_detection.yolo1.datasets.transforms import transform_targets_to_yolo
 
@@ -190,7 +190,54 @@ class MnistAugDataset(Dataset):
 
 
 class MnistAugDataModule(pl.LightningDataModule):
-    pass
+    def __init__(
+        self,
+        data_path_train: str,
+        data_path_val: str,
+        data_augment: bool,
+        batch_size: int,
+        dataloader_num_workers: int,
+        grid_size: int,
+        **_
+    ):
+        super(MnistAugDataModule, self).__init__()
+
+        self.data_path_train = data_path_train
+        self.data_path_val = data_path_val
+        self.augment = data_augment
+        self.batch_size = batch_size
+        self.num_workers = dataloader_num_workers
+        self.grid_size = grid_size
+
+        self.dataset_train, self.dataset_val = None, None
+
+    def setup(self, stage=None):
+        self.dataset_train = MnistAugDataset(
+            data_path=self.data_path_train,
+            augment=self.augment,
+            grid_size=self.grid_size,
+        )
+        self.dataset_val = MnistAugDataset(
+            data_path=self.data_path_val,
+            augment=False,
+            grid_size=self.grid_size,
+        )
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.dataset_train,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.dataset_val,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
 
 if __name__ == "__main__":
