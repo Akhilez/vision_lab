@@ -8,6 +8,27 @@ from mnist_aug.mnist_augmenter import MnistAugDataManager, MNISTAug
 
 
 def main():
+    """
+    Saves images and annotations.yaml file in the following format:
+    <image_name>:
+        height: 112
+        width: 112
+        image_id: 0
+        annotations:
+          - class: 6
+            cx: 30.5
+            cy: 76.5
+            height: 45
+            id: 2
+            type: number
+            width: 45
+            x1: 8
+            x2: 53
+            y1: 54
+            y2: 99
+    :return:
+    """
+
     cfg = DictConfig(
         {
             "output_dataset_path": "/Users/akhil/code/vision_lab/data/mnist_detection/sample/test",
