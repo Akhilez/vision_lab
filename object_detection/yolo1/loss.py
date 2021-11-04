@@ -2,7 +2,7 @@ from typing import Dict
 import torch
 from torch import nn
 from torch.nn import functional as F
-from object_detection.yolo1.transforms import YoloV1Transforms
+from object_detection.yolo1.datasets.transforms import transform_targets_from_yolo
 
 
 class YoloV1Loss(nn.Module):
@@ -171,12 +171,12 @@ class YoloV1Loss(nn.Module):
         """
 
         # shape: (batch, 4, B, S, S)
-        preds_denorm = YoloV1Transforms.transform_targets_from_yolo(
+        preds_denorm = transform_targets_from_yolo(
             preds, image_height, image_width, self.num_classes
         )
 
         # shape: (batch, 4, 1, S, S)
-        targets_denorm = YoloV1Transforms.transform_targets_from_yolo(
+        targets_denorm = transform_targets_from_yolo(
             targets, image_height, image_width, self.num_classes
         )
 
@@ -238,13 +238,15 @@ class YoloV1Loss(nn.Module):
 
         return iou
 
-    def _max(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _max(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Simply finds the max off the two tensors.
         Shapes of the two tensors has to be same.
         """
         return torch.amax(torch.stack([x, y]), dim=0)
 
-    def _min(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _min(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Simply finds the max off the two tensors.
         Shapes of the two tensors has to be same.
         """
