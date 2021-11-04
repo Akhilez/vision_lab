@@ -24,6 +24,7 @@ config = {
     "output_path": f"{BASE_DIR}/object_detection/yolo1/output",
     "val_split": 0.1,
     "data_path": f"{BASE_DIR}/object_detection/data",
+    "in_channels": 3,
     "num_classes": 20,
     "image_height": 448,
     "image_width": 448,

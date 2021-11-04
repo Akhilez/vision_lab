@@ -2,13 +2,9 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 import wandb
-from pytorch_lightning.loggers import WandbLogger
 from torchmetrics import AverageMeter, MetricCollection
-from torchsummary import summary
-from object_detection.yolo1.datasets.voc_dataset import VocYoloDataModule
 from object_detection.yolo1.loss import YoloV1Loss
 from object_detection.yolo1.model import YoloV1
-from settings import BASE_DIR
 
 
 class MyMetricCollection(MetricCollection):
@@ -33,6 +29,7 @@ class MyMetricCollection(MetricCollection):
 class YoloV1PL(pl.LightningModule):
     def __init__(
         self,
+        in_channels: int,
         num_boxes: int,
         num_classes: int,
         grid_size: int,
@@ -50,6 +47,7 @@ class YoloV1PL(pl.LightningModule):
             split_size=grid_size,
             num_boxes=num_boxes,
             num_classes=num_classes,
+            in_channels=in_channels,
         )
         self.criterion = YoloV1Loss(
             num_boxes=num_boxes,

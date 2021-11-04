@@ -98,9 +98,11 @@ architecture_config = [
 
 
 class YoloV1(nn.Module):
-    def __init__(self, split_size, num_boxes, num_classes):
+    def __init__(
+        self, split_size: int, num_boxes: int, num_classes: int, in_channels: int
+    ):
         super(YoloV1, self).__init__()
-        self.backbone = SimpleCNN(architecture_config, in_channels=3)
+        self.backbone = SimpleCNN(architecture_config, in_channels=in_channels)
 
         S, B, C = split_size, num_boxes, num_classes
         self.fcs = nn.Sequential(
