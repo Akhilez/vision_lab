@@ -1,7 +1,5 @@
 from unittest import TestCase
-
 import torch
-
 from object_detection.yolo1.loss import YoloV1Loss
 from object_detection.yolo1.transforms import YoloV1Transforms
 

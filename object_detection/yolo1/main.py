@@ -5,10 +5,10 @@ import wandb
 from pytorch_lightning.loggers import WandbLogger
 from torchmetrics import AverageMeter, MetricCollection
 from torchsummary import summary
-
 from object_detection.yolo1.dataset import VocYoloDataModule
 from object_detection.yolo1.loss import YoloV1Loss
 from object_detection.yolo1.model import YoloV1
+from settings import BASE_DIR
 
 
 class MyMetricCollection(MetricCollection):
@@ -159,9 +159,9 @@ hp = {
 }
 
 config = {
-    "output_path": "./output",
+    "output_path": f"{BASE_DIR}/object_detection/yolo1/output",
     "val_split": 0.1,
-    "data_path": "./data",
+    "data_path": f"{BASE_DIR}/object_detection/data",
     "num_classes": 20,
     "image_height": 448,
     "image_width": 448,
