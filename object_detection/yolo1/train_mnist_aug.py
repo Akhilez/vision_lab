@@ -37,14 +37,14 @@ config = {
 data_module = MnistAugDataModule(**config, **hp)
 model = YoloV1PL(**hp, **config).to(device).float()
 summary(model, (config["in_channels"], config["image_height"], config["image_width"]))
-# wandb_logger = WandbLogger(
-#     project="mnist_detection_yolo1", log_model=False, save_dir="../wandb_logs"
-# )
+wandb_logger = WandbLogger(
+    project="mnist_detection_yolo1", log_model=False, save_dir="../wandb_logs"
+)
 trainer = pl.Trainer(
     gpus=config["num_gpus"],
     max_epochs=hp["epochs"],
     default_root_dir=config["output_path"],
-    # logger=wandb_logger,
+    logger=wandb_logger,
 )
 # wandb_logger.watch(model)
 

@@ -1,6 +1,5 @@
 import pytorch_lightning as pl
 import torch
-import wandb
 from torchmetrics import AverageMeter
 from object_detection.yolo1.datasets.transforms import transform_targets_from_yolo
 from object_detection.yolo1.experiment_logger import get_wandb_visualizations
@@ -27,6 +26,7 @@ class YoloV1PL(pl.LightningModule):
         super().__init__()
         self.image_height = image_height
         self.image_width = image_width
+        self.num_boxes = num_boxes
         self.num_classes = num_classes
         self.hp = hp
         self.yolo_v1 = YoloV1(
@@ -90,9 +90,17 @@ class YoloV1PL(pl.LightningModule):
 
         # ----------- metrics and logs -------------
         self.metrics_train.update_each(losses)
-        self.log("train/loss_step", losses["loss"], prog_bar=True)
+        self.log("train/loss_step", losses["loss"])
         if batch_index == 0:
-            self._log_visualizations()
+            self._log_visualizations(
+                "train/overlays",
+                images,
+                preds_denorm,
+                targets_denorm,
+                preds,
+                targets,
+                ious,
+            )
 
         return losses["loss"]
 
@@ -130,13 +138,28 @@ class YoloV1PL(pl.LightningModule):
 
         return preds_denorm, targets_denorm
 
-    def _log_visualizations(self, images, preds, targets):
+    def _log_visualizations(
+        self, key, images, preds_denorm, targets_denorm, preds, targets, ious
+    ):
         confidence_indices = [self.num_classes + (i * 5) for i in range(self.num_boxes)]
         confidences = preds[:, tuple(confidence_indices)]  # (batch, B, S, S)
-        self.logger.experiment.log(
-            {
-                "train/predictions": get_wandb_visualizations(
-                    images, preds, targets, confidences, limit=self.hp["num_log_images"]
-                )
-            }
+
+        classes_true = targets[:, : self.num_classes]  # shape (batch, C, S, S)
+        classes_pred = preds[:, : self.num_classes]  # shape (batch, C, S, S)
+
+        object_exists = targets[:, self.num_classes]  # shape: (batch, S, S)
+
+        log = get_wandb_visualizations(
+            images,
+            preds_denorm,
+            targets_denorm,
+            object_exists,
+            classes_true,
+            classes_pred,
+            ious,
+            confidences,
+            confidence_threshold=0.1,
+            limit=self.hp["num_log_images"],
         )
+
+        self.logger.experiment.log({key: log})

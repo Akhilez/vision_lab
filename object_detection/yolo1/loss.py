@@ -70,8 +70,8 @@ class YoloV1Loss(nn.Module):
         :return: a dict of all losses.
         """
 
-        # shape: (batch, S, S)
-        object_exists = targets[:, self.num_classes]
+        # This channel represents 1 or 0 depending on the box's existence.
+        object_exists = targets[:, self.num_classes]  # shape: (batch, S, S)
 
         # shape (batch, B, S, S)
         responsibility = (
@@ -105,8 +105,8 @@ class YoloV1Loss(nn.Module):
         }
 
     def _get_class_loss(self, preds, targets, object_exists):
-        c = preds[:, : self.num_classes]  # shape (batch, C, S, S)
-        c_hat = targets[:, : self.num_classes]  # shape (batch, C, S, S)
+        c_hat = preds[:, : self.num_classes]  # shape (batch, C, S, S)
+        c = targets[:, : self.num_classes]  # shape (batch, C, S, S)
 
         c_loss = self.mse(c_hat, c)  # shape (batch, C, S, S)
         c_loss = c_loss.sum(dim=1)  # shape (batch, S, S)

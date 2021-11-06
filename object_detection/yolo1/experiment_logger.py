@@ -33,34 +33,91 @@ def get_wandb_visualizations(
     images: torch.Tensor,
     predictions: torch.Tensor,
     targets: torch.Tensor,
+    object_exists: torch.Tensor,
+    classes_true: torch.Tensor,
+    classes_pred: torch.Tensor,
+    ious: torch.Tensor,
     confidences: torch.Tensor,
+    confidence_threshold: float = 0.5,
     limit: int = 1,
 ) -> wandb.Image:
     """
-    Okay, so
+    Wait, there are many boxes in predictions and targets. Not all of them will be logged.
+    How to filter?
+    Predictions:
+        Find all the pred_boxes where confidence > threshold.
+    Targets:
+        Find the ones where object_exists channel is 1.
     :param images: torch.Tensor
-    :param predictions: de=normalized. Shape: (batch, 4, B, S, S)
+    :param predictions: de-normalized. Shape: (batch, 4, B, S, S)
     :param targets: de-normalized. Shape: (batch, 4, 1, S, S)
-    :param confidences: A 0-1 tensor of shape (batch, B)
+    :param object_exists: shape: (batch, S, S)
+    :param classes_true: tensor of shape (batch, C, S, S)
+    :param classes_pred: tensor of shape (batch, C, S, S)
+    :param ious:  shape: (batch, B, S, S)
+    :param confidences: A 0-1 tensor of shape (batch, B, S, S)
+    :param confidence_threshold: float value to filter best boxes.
     :param limit: int
     :return:
     """
-    for i in range(limit):
-        visualization = {
-            "predictions": {
-                "box_data": [
+    classes_true = classes_true.argmax(dim=1)  # shape (batch, S, S)
+    classes_pred = classes_pred.argmax(dim=1)  # shape (batch, S, S)
+    batch_size, num_boxes, grid_size, _ = confidences.shape
+
+    for b in range(limit):
+
+        pred_boxes = []
+        true_boxes = []
+
+        for cell_box in range(num_boxes):
+            # shape: (n, 2)
+            filtered_indices_pred = (
+                confidences[b, cell_box] > confidence_threshold
+            ).nonzero()
+            for row, col in filtered_indices_pred:
+                min_x, min_y, max_x, max_y = predictions[b, :, cell_box, row, col]
+                confidence = confidences[b, cell_box, row, col]
+                iou = ious[b, cell_box, row, col]
+                class_pred = classes_pred[b, row, col]
+                pred_boxes.append(
                     {
                         "position": {
-                            "minX": 0,
-                            "minY": 0,
-                            "maxX": 0,
-                            "maxY": 0,
+                            "minX": float(min_y),
+                            "minY": float(min_x),
+                            "maxX": float(max_y),
+                            "maxY": float(max_x),
                         },
                         "domain": "pixel",
-                        "class_id": 1,
-                        "scores": {"iou": 0.9},
+                        "class_id": int(class_pred),
+                        "scores": {"confidence": float(confidence), "iou": float(iou)},
                     }
-                ],
+                )
+
+        if len(pred_boxes) == 0:
+            continue
+
+        # shape: (n, 2)
+        filtered_indices_true = (object_exists[b] > 0).nonzero()
+        for row, col in filtered_indices_true:
+            min_x, min_y, max_x, max_y = targets[b, :, 0, row, col]
+            class_true = classes_true[b, row, col]
+            true_boxes.append(
+                {
+                    "position": {
+                        "minX": float(min_y),
+                        "minY": float(min_x),
+                        "maxX": float(max_y),
+                        "maxY": float(max_x),
+                    },
+                    "domain": "pixel",
+                    "class_id": int(class_true),
+                }
+            )
+
+        return wandb.Image(
+            images[b],
+            boxes={
+                "predictions": {"box_data": pred_boxes},
+                "ground_truth": {"box_data": true_boxes},
             },
-            "ground_truth": {},
-        }
+        )
