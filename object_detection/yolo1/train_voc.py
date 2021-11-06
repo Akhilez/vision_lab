@@ -22,8 +22,8 @@ hp = {
 
 config = {
     "output_path": f"{BASE_DIR}/object_detection/yolo1/output",
-    "val_split": 0.1,
     "data_path": f"{BASE_DIR}/object_detection/data",
+    "in_channels": 3,
     "num_classes": 20,
     "image_height": 448,
     "image_width": 448,
@@ -35,7 +35,7 @@ config = {
 
 data_module = VocYoloDataModule(**config, **hp)
 model = YoloV1PL(**hp, **config).cuda().float()
-summary(model, (3, config["image_height"], config["image_width"]))
+summary(model, (config["in_channels"], config["image_height"], config["image_width"]))
 wandb_logger = WandbLogger(
     project="yolo_test", log_model=False, save_dir="../wandb_logs"
 )

@@ -1,38 +1,17 @@
-from typing import Any
 import pytorch_lightning as pl
 import torch
-import wandb
-from pytorch_lightning.loggers import WandbLogger
-from torchmetrics import AverageMeter, MetricCollection
-from torchsummary import summary
-from object_detection.yolo1.datasets.voc_dataset import VocYoloDataModule
+from torchmetrics import AverageMeter
+from object_detection.yolo1.datasets.transforms import transform_targets_from_yolo
+from object_detection.yolo1.experiment_logger import get_wandb_visualizations
 from object_detection.yolo1.loss import YoloV1Loss
+from object_detection.yolo1.metrics import MyMetricCollection, get_ious
 from object_detection.yolo1.model import YoloV1
-from settings import BASE_DIR
-
-
-class MyMetricCollection(MetricCollection):
-    def update_each(self, params: dict, **kwargs: Any) -> None:
-        """params is a dict where key is the metric key and the values are tuples of positional arguments.
-        Keyword arguments (kwargs) will be filtered based on the signature of the individual metric.
-        """
-        for key, m in self.items(keep_base=True):
-            if key in params:
-                args = params[key]
-                if type(args) is not tuple:
-                    args = (args,)
-                m_kwargs = m._filter_kwargs(**kwargs)
-                m.update(*args, **m_kwargs)
-
-    def compute(self):
-        result = super().compute()
-        self.reset()
-        return result
 
 
 class YoloV1PL(pl.LightningModule):
     def __init__(
         self,
+        in_channels: int,
         num_boxes: int,
         num_classes: int,
         grid_size: int,
@@ -45,11 +24,16 @@ class YoloV1PL(pl.LightningModule):
         **hp,
     ):
         super().__init__()
+        self.image_height = image_height
+        self.image_width = image_width
+        self.num_boxes = num_boxes
+        self.num_classes = num_classes
         self.hp = hp
         self.yolo_v1 = YoloV1(
             split_size=grid_size,
             num_boxes=num_boxes,
             num_classes=num_classes,
+            in_channels=in_channels,
         )
         self.criterion = YoloV1Loss(
             num_boxes=num_boxes,
@@ -98,27 +82,27 @@ class YoloV1PL(pl.LightningModule):
     def training_step(self, batch, batch_index):
         images, targets = batch
         preds = self(images)
-        losses = self.criterion(preds, targets)
-        return {
-            "images": images,
-            "targets": targets,
-            "preds": preds.detach(),
-            "losses": losses,
-            "batch_index": batch_index,
-        }
 
-    def training_step_end(self, outputs: dict):
-        losses = outputs["losses"]
-        batch_index = outputs["batch_index"]
-        images = outputs["images"]
+        preds_denorm, targets_denorm = self._denorm(preds.detach(), targets)
+        ious = get_ious(preds_denorm, targets_denorm)  # shape: (batch, B, S, S)
 
+        losses = self.criterion(preds, targets, ious)
+
+        # ----------- metrics and logs -------------
         self.metrics_train.update_each(losses)
-        self.log("train/loss_step", losses["loss"], prog_bar=True)
+        self.log("train/loss_step", losses["loss"])
         if batch_index == 0:
-            images_to_log = images[: self.hp["num_log_images"]]
-            self.logger.experiment.log(
-                {"train/predictions": wandb.Image(images_to_log)}
+            self._log_visualizations(
+                "train/overlays",
+                images,
+                preds_denorm,
+                targets_denorm,
+                preds,
+                targets,
+                ious,
             )
+
+        return losses["loss"]
 
     def training_epoch_end(self, outputs):
         self.log_dict(self.metrics_train.compute())
@@ -126,7 +110,12 @@ class YoloV1PL(pl.LightningModule):
     def validation_step(self, batch, _index):
         images, targets = batch
         preds = self(images)
-        losses = self.criterion(preds, targets)
+
+        preds_denorm, targets_denorm = self._denorm(preds.detach(), targets)
+        ious = get_ious(preds_denorm, targets_denorm)  # shape: (batch, B, S, S)
+
+        losses = self.criterion(preds, targets, ious)
+
         return losses
 
     def validation_step_end(self, losses):
@@ -134,3 +123,43 @@ class YoloV1PL(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         self.log_dict(self.metrics_val.compute())
+
+    def _denorm(self, preds, targets):
+
+        # shape: (batch, 4, B, S, S)
+        preds_denorm = transform_targets_from_yolo(
+            preds, self.image_height, self.image_width, self.num_classes
+        )
+
+        # shape: (batch, 4, 1, S, S)
+        targets_denorm = transform_targets_from_yolo(
+            targets, self.image_height, self.image_width, self.num_classes
+        )
+
+        return preds_denorm, targets_denorm
+
+    def _log_visualizations(
+        self, key, images, preds_denorm, targets_denorm, preds, targets, ious
+    ):
+        confidence_indices = [self.num_classes + (i * 5) for i in range(self.num_boxes)]
+        confidences = preds[:, tuple(confidence_indices)]  # (batch, B, S, S)
+
+        classes_true = targets[:, : self.num_classes]  # shape (batch, C, S, S)
+        classes_pred = preds[:, : self.num_classes]  # shape (batch, C, S, S)
+
+        object_exists = targets[:, self.num_classes]  # shape: (batch, S, S)
+
+        log = get_wandb_visualizations(
+            images,
+            preds_denorm,
+            targets_denorm,
+            object_exists,
+            classes_true,
+            classes_pred,
+            ious,
+            confidences,
+            confidence_threshold=0.1,
+            limit=self.hp["num_log_images"],
+        )
+
+        self.logger.experiment.log({key: log})

@@ -1,7 +1,11 @@
 from unittest import TestCase
 import torch
+
+from object_detection.yolo1.datasets.transforms import (
+    transform_targets_to_yolo,
+    transform_targets_from_yolo,
+)
 from object_detection.yolo1.loss import YoloV1Loss
-from object_detection.yolo1.transforms import YoloV1Transforms
 
 
 class TestYolo(TestCase):
@@ -12,14 +16,14 @@ class TestYolo(TestCase):
         self.grid_size = 3
         self.num_boxes = 2
         self.batch_size = 2
-
-        self.transforms = YoloV1Transforms(
-            h=self.h,
-            w=self.w,
-            augment=False,
-            num_classes=self.num_classes,
-            grid_size=self.grid_size,
-        )
+        #
+        # self.transforms = YoloV1Transforms(
+        #     h=self.h,
+        #     w=self.w,
+        #     augment=False,
+        #     num_classes=self.num_classes,
+        #     grid_size=self.grid_size,
+        # )
 
         # ---- TARGETS ----
 
@@ -90,11 +94,18 @@ class TestYolo(TestCase):
         )
 
     def test_labels_to_targets(self):
-        targets = self.transforms.transform_targets_to_yolo(self.x1y1x2y2, self.classes)
+        targets = transform_targets_to_yolo(
+            self.x1y1x2y2,
+            classes=self.classes,
+            num_classes=self.num_classes,
+            grid_size=self.grid_size,
+            h=self.h,
+            w=self.w,
+        )
         assert torch.all(targets == self.targets[0])
 
     def test_yolo_to_normal_2(self):
-        preds = self.transforms.transform_targets_from_yolo(
+        preds = transform_targets_from_yolo(
             self.preds,
             image_height=self.h,
             image_width=self.w,
