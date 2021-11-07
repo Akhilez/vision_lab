@@ -173,12 +173,12 @@ def save_final_results(output_path, wandb_logger, checkpoint_callback):
     checkpoint_path = checkpoint_callback.best_model_path
     wandb_logger.experiment.save(checkpoint_path)
 
-    summary = dict(wandb_logger.experiment.summary)
-    del summary["train/overlays"]
+    # summary = dict(wandb_logger.experiment.summary)
+    # del summary["train/overlays"]
 
     final_dict = {
-        "config": dict(wandb_logger.experiment.config),
-        "summary": summary,
+        **dict(wandb_logger.experiment.config),
+        # "summary": summary,
         "best_checkpoint_path": checkpoint_path,
     }
 
