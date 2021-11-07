@@ -96,25 +96,19 @@ Information about architecture config:
 #     (3, 64, 2, 1),  # 7
 #     (3, 32, 1, 1),
 # ]
-# For mnist aug
-architecture_config = [
-    (7, 64, 2, 3),  # 112
-    "M",  # 56
-    (3, 194, 1, 1),
-    "M",  # 28
-    [(1, 128, 1, 0), (3, 128, 1, 1), 2],
-    "M",  # 14
-    [(1, 128, 1, 0), (3, 128, 1, 1), 4],
-    (3, 32, 1, 0),  # 5
-]
 
 
 class YoloV1(nn.Module):
     def __init__(
-        self, split_size: int, num_boxes: int, num_classes: int, in_channels: int
+        self,
+        split_size: int,
+        num_boxes: int,
+        num_classes: int,
+        in_channels: int,
+        architecture: list,
     ):
         super(YoloV1, self).__init__()
-        self.backbone = SimpleCNN(architecture_config, in_channels=in_channels)
+        self.backbone = SimpleCNN(architecture, in_channels=in_channels)
 
         S, B, C = split_size, num_boxes, num_classes
         self.fcs = nn.Sequential(

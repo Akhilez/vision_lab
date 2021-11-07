@@ -8,7 +8,7 @@ from object_detection.yolo1.trainer import YoloV1PL, save_final_results
 from settings import BASE_DIR, device
 
 
-def main(hp, config):
+def train_mnist_aug_yolo1(hp, config):
     output_path = join(config["output_path"], config["project_name"])
     data_module = MnistAugDataModule(**config, **hp)
     model = YoloV1PL(**hp, **config).to(device).float()
@@ -44,6 +44,18 @@ def main(hp, config):
 
 
 if __name__ == "__main__":
+    architecture_config = [
+        # (kernel_size, filters, stride, padding)
+        (7, 64, 2, 3),  # 112 -> 56
+        "M",  # 56 -> 28
+        (3, 194, 1, 1),
+        # [(1, 128, 1, 0), (3, 128, 1, 1), 2],
+        "M",  # 28 -> 14
+        [(1, 128, 1, 0), (3, 128, 1, 1), 1],
+        "M",  # 14 -> 7
+        [(1, 128, 1, 0), (3, 128, 1, 1), 1],
+        (3, 32, 1, 0),  # 7 -> 5
+    ]
     hp = {
         "epochs": 1,
         "batch_size": 32,
@@ -72,5 +84,6 @@ if __name__ == "__main__":
         "num_log_images": 3,
         "dataloader_num_workers": 0,
         "num_gpus": 0,
+        "architecture": architecture_config,
     }
-    main(hp, config)
+    train_mnist_aug_yolo1(hp, config)

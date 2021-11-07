@@ -23,6 +23,7 @@ class YoloV1PL(pl.LightningModule):
         lambda_object_exists: float,
         lambda_no_object: float,
         lambda_class: float,
+        architecture: list,
         **hp,
     ):
         super().__init__()
@@ -36,6 +37,7 @@ class YoloV1PL(pl.LightningModule):
             num_boxes=num_boxes,
             num_classes=num_classes,
             in_channels=in_channels,
+            architecture=architecture,
         )
         self.criterion = YoloV1Loss(
             num_boxes=num_boxes,
