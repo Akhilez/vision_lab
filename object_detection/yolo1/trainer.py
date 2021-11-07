@@ -1,5 +1,7 @@
+from os.path import join
 import pytorch_lightning as pl
 import torch
+import yaml
 from torchmetrics import AverageMeter
 from object_detection.yolo1.datasets.transforms import transform_targets_from_yolo
 from object_detection.yolo1.experiment_logger import get_wandb_visualizations
@@ -21,6 +23,7 @@ class YoloV1PL(pl.LightningModule):
         lambda_object_exists: float,
         lambda_no_object: float,
         lambda_class: float,
+        architecture: list,
         **hp,
     ):
         super().__init__()
@@ -34,6 +37,7 @@ class YoloV1PL(pl.LightningModule):
             num_boxes=num_boxes,
             num_classes=num_classes,
             in_channels=in_channels,
+            architecture=architecture,
         )
         self.criterion = YoloV1Loss(
             num_boxes=num_boxes,
@@ -163,3 +167,22 @@ class YoloV1PL(pl.LightningModule):
         )
 
         self.logger.experiment.log({key: log})
+
+
+def save_final_results(output_path, wandb_logger, checkpoint_callback):
+    checkpoint_path = checkpoint_callback.best_model_path
+    wandb_logger.experiment.save(checkpoint_path)
+
+    summary = dict(wandb_logger.experiment.summary)
+    del summary["train/overlays"]
+
+    final_dict = {
+        "config": dict(wandb_logger.experiment.config),
+        "summary": summary,
+        "best_checkpoint_path": checkpoint_path,
+    }
+
+    config_path = join(output_path, "output.yaml")
+    with open(config_path, "w") as output_file:
+        yaml.safe_dump(final_dict, output_file)
+    wandb_logger.experiment.save(config_path)
