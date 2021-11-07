@@ -2,7 +2,7 @@ from typing import Dict
 import torch
 from torch import nn
 from torch.nn import functional as F
-from object_detection.yolo1.datasets.transforms import transform_targets_from_yolo
+from settings import device
 
 
 class YoloV1Loss(nn.Module):
@@ -69,6 +69,8 @@ class YoloV1Loss(nn.Module):
         :param ious: torch.Tensor of shape (batch, B, S, S)
         :return: a dict of all losses.
         """
+
+        ious = ious.to(device)
 
         # This channel represents 1 or 0 depending on the box's existence.
         object_exists = targets[:, self.num_classes]  # shape: (batch, S, S)

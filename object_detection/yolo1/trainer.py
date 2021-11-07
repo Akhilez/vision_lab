@@ -87,7 +87,7 @@ class YoloV1PL(pl.LightningModule):
         images, targets = batch
         preds = self(images)
 
-        preds_denorm, targets_denorm = self._denorm(preds.detach(), targets)
+        preds_denorm, targets_denorm = self._denorm(preds.detach().cpu(), targets.cpu())
         ious = get_ious(preds_denorm, targets_denorm)  # shape: (batch, B, S, S)
 
         losses = self.criterion(preds, targets, ious)
@@ -115,7 +115,7 @@ class YoloV1PL(pl.LightningModule):
         images, targets = batch
         preds = self(images)
 
-        preds_denorm, targets_denorm = self._denorm(preds.detach(), targets)
+        preds_denorm, targets_denorm = self._denorm(preds.detach().cpu(), targets.cpu())
         ious = get_ious(preds_denorm, targets_denorm)  # shape: (batch, B, S, S)
 
         losses = self.criterion(preds, targets, ious)
