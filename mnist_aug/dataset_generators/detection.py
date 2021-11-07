@@ -7,7 +7,7 @@ from tqdm import tqdm
 from mnist_aug.mnist_augmenter import MnistAugDataManager, MNISTAug
 
 
-def main():
+def main(cfg):
     """
     Saves images and annotations.yaml file in the following format:
     <image_name>:
@@ -29,14 +29,6 @@ def main():
     :return:
     """
 
-    cfg = DictConfig(
-        {
-            "output_dataset_path": "/Users/akhil/code/vision_lab/data/mnist_detection/sample/test",
-            "size": 100,
-            "train": False,
-        }
-    )
-
     makedirs(cfg.output_dataset_path, exist_ok=True)
 
     data_manager = MnistAugDataManager()
@@ -45,6 +37,7 @@ def main():
     y = data_manager.y_train if cfg.train else data_manager.y_test
 
     aug = MNISTAug()
+    aug.min_objects = 1
     xs, ys = aug.get_augmented(
         x,
         y,
@@ -84,4 +77,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(
+        DictConfig(
+            {
+                "output_dataset_path": "/Users/akhil/code/vision_lab/data/mnist_detection/v10k/test",
+                "size": 1000,
+                "train": False,
+            }
+        )
+    )

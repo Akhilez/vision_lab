@@ -18,7 +18,7 @@ def train_mnist_aug_yolo1(hp, config):
     wandb_logger = WandbLogger(
         project=config["project_name"],
         log_model=False,
-        save_dir=f"{BASE_DIR}/_wandb_logs",
+        # save_dir=join(output_path, "_wandb_logs"),
         config={**hp, **config},
     )
     checkpoint_callback = ModelCheckpoint(

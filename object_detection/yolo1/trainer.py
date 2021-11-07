@@ -87,7 +87,7 @@ class YoloV1PL(pl.LightningModule):
         images, targets = batch
         preds = self(images)
 
-        preds_denorm, targets_denorm = self._denorm(preds.detach(), targets)
+        preds_denorm, targets_denorm = self._denorm(preds.detach().cpu(), targets.cpu())
         ious = get_ious(preds_denorm, targets_denorm)  # shape: (batch, B, S, S)
 
         losses = self.criterion(preds, targets, ious)
@@ -115,7 +115,7 @@ class YoloV1PL(pl.LightningModule):
         images, targets = batch
         preds = self(images)
 
-        preds_denorm, targets_denorm = self._denorm(preds.detach(), targets)
+        preds_denorm, targets_denorm = self._denorm(preds.detach().cpu(), targets.cpu())
         ious = get_ious(preds_denorm, targets_denorm)  # shape: (batch, B, S, S)
 
         losses = self.criterion(preds, targets, ious)
@@ -173,12 +173,12 @@ def save_final_results(output_path, wandb_logger, checkpoint_callback):
     checkpoint_path = checkpoint_callback.best_model_path
     wandb_logger.experiment.save(checkpoint_path)
 
-    summary = dict(wandb_logger.experiment.summary)
-    del summary["train/overlays"]
+    # summary = dict(wandb_logger.experiment.summary)
+    # del summary["train/overlays"]
 
     final_dict = {
-        "config": dict(wandb_logger.experiment.config),
-        "summary": summary,
+        **dict(wandb_logger.experiment.config),
+        # "summary": summary,
         "best_checkpoint_path": checkpoint_path,
     }
 
