@@ -2,11 +2,15 @@ from os.path import join
 import pytorch_lightning as pl
 import torch
 import yaml
-from torchmetrics import AverageMeter
+from torchmetrics import MeanMetric
 from object_detection.yolo1.datasets.transforms import transform_targets_from_yolo
 from object_detection.yolo1.experiment_logger import get_wandb_visualizations
 from object_detection.yolo1.loss import YoloV1Loss
-from object_detection.yolo1.metrics import MyMetricCollection, get_ious
+from object_detection.yolo1.metrics import (
+    MyMetricCollection,
+    get_ious,
+    YoloMeanAveragePrecision,
+)
 from object_detection.yolo1.model import YoloV1
 
 
@@ -53,11 +57,15 @@ class YoloV1PL(pl.LightningModule):
         # --- metrics ---
         self.metrics_train = MyMetricCollection(
             {
-                "loss": AverageMeter(),
-                "loss_coords": AverageMeter(),
-                "loss_confidence": AverageMeter(),
-                "loss_confidence_negative": AverageMeter(),
-                "loss_class": AverageMeter(),
+                "loss": MeanMetric(),
+                "loss_coords": MeanMetric(),
+                "loss_confidence": MeanMetric(),
+                "loss_confidence_negative": MeanMetric(),
+                "loss_class": MeanMetric(),
+                "mAP": YoloMeanAveragePrecision(
+                    box_format="xyxy",
+                    max_detection_thresholds=[1, 4, 8],
+                ),
             },
             prefix="train/",
         )
@@ -87,14 +95,16 @@ class YoloV1PL(pl.LightningModule):
         images, targets = batch
         preds = self(images)
 
+        # TODO: Q: Why set this to .cpu()?
         preds_denorm, targets_denorm = self._denorm(preds.detach().cpu(), targets.cpu())
         ious = get_ious(preds_denorm, targets_denorm)  # shape: (batch, B, S, S)
 
         losses = self.criterion(preds, targets, ious)
 
         # ----------- metrics and logs -------------
-        self.metrics_train.update_each(losses)
-        self.log("train/loss_step", losses["loss"])
+        metric_args = {"mAP": (preds_denorm, targets_denorm), **losses}
+        self.metrics_train.update_each(metric_args)
+        self.log("train/loss_step", losses["loss"].detach())
         if batch_index == 0:
             self._log_visualizations(
                 "train/overlays",
@@ -120,10 +130,10 @@ class YoloV1PL(pl.LightningModule):
 
         losses = self.criterion(preds, targets, ious)
 
-        return losses
+        metric_args = {"mAP": (preds_denorm, targets_denorm), **losses}
+        self.metrics_val.update_each(metric_args)
 
-    def validation_step_end(self, losses):
-        self.metrics_val.update_each(losses)
+        return losses
 
     def on_validation_epoch_end(self):
         self.log_dict(self.metrics_val.compute())

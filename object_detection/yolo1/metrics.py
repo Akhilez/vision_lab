@@ -1,6 +1,7 @@
 from typing import Any
 import torch
 from torchmetrics import MetricCollection
+from torchmetrics.detection import MeanAveragePrecision
 
 
 class MyMetricCollection(MetricCollection):
@@ -20,6 +21,84 @@ class MyMetricCollection(MetricCollection):
         result = super().compute()
         self.reset()
         return result
+
+
+class YoloMeanAveragePrecision(MeanAveragePrecision):
+    def update(
+        self,
+        pred_boxes: torch.Tensor,
+        preds: torch.Tensor,
+        num_classes: int,
+        num_boxes: int,
+        target_boxes: torch.Tensor,
+        targets: torch.Tensor,
+    ):
+        """
+        Wrapper around MeanAveragePrecision for I/O
+
+        Find the following:
+        1. pred_confidences which will be of shape (batch, B, S, S), convert to (batch, B*S*S)
+        2. pred_classes which whill be of shape (batch, C, S, S), convert to (batch, B*S*S)
+        3. target_classes shape (batch, C, S, S), convert to (batch, B*S*S)
+
+        Parameters
+        ----------
+        pred_boxes: torch.Tensor
+            xyxy type predicted boxes of the shape (batch, 4, B, S, S).
+            This has to be converted into shape (batch, B*S*S, 4).
+        preds: torch.Tensor
+            Returned tensor of shape: (batch, (C + 5B), S, S).
+        num_classes: int
+            C
+        num_boxes: int
+            B
+        target_boxes: torch.Tensor
+            xyxy type targets (batch, 4, 1, S, S)
+            This has to be converted into shape (batch, S*S, 4).
+        targets: torch.Tensor
+            Target tensor of shape: (batch, (C + 5), S, S)
+        """
+
+        pred_boxes = pred_boxes.flatten(start_dim=2)  # (batch, 4, B*S*S)
+        pred_boxes = pred_boxes.moveaxis(1, 2)  # (batch, B*S*S, 4)
+
+        confidence_indices = [num_classes + (i * 5) for i in range(num_boxes)]
+        pred_confidences = preds[:, tuple(confidence_indices)]  # (batch, B, S, S)
+        pred_confidences = pred_confidences.flatten(start_dim=1)  # (batch, B*S*S)
+
+        pred_classes = preds[:, : num_classes]  # shape (batch, C, S, S)
+        pred_classes = pred_classes.argmax(dim=1, keepdim=True)  # shape (batch, 1, S, S)
+        pred_classes = pred_classes.expand((-1, num_boxes, -1, -1))  # shape (batch, B, S, S)
+        pred_classes = pred_classes.flatten(start_dim=1)  # shape (batch, B*S*S)
+
+        target_boxes = target_boxes.flatten(start_dim=2)  # shape (batch, 4, S*S)
+        target_boxes = target_boxes.moveaxis(1, 2)  # shape (batch, S*S, 4)
+
+        target_classes = targets[:, : self.num_classes]  # shape (batch, C, S, S)
+        target_classes = target_classes.argmax(dim=1, keepdim=True)  # shape (batch, 1, S, S)
+        target_classes = target_classes.flatten(start_dim=1)  # shape (batch, S*S)
+        # TODO: Filter these classes and target_boxes to only the "real" objects. Not the background ones.
+
+        batch_size = len(pred_boxes)
+
+        preds_list = [
+            dict(
+                boxes=pred_boxes[i],
+                scores=pred_confidences[i],
+                labels=pred_classes[i]
+            )
+            for i in range(batch_size)
+        ]
+
+        targets_list = [
+            dict(
+                boxes=target_boxes[i],
+                labels=target_classes[i],
+            )
+            for i in range(batch_size)
+        ]
+
+        return super().update(preds_list, targets_list)
 
 
 def get_ious(preds_denorm, targets_denorm) -> torch.Tensor:
