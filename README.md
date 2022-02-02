@@ -4,3 +4,8 @@
 ---
 
 This repo contains implementations of few Computer Vision solutions like classification, object detection, etc.
+
+
+## TODO:
+
+- [ ] Test the torchmetrics mAP
