@@ -55,21 +55,16 @@ class YoloV1PL(pl.LightningModule):
         )
 
         # --- metrics ---
-        self.metrics_train = MyMetricCollection(
-            {
-                "loss": MeanMetric(),
-                "loss_coords": MeanMetric(),
-                "loss_confidence": MeanMetric(),
-                "loss_confidence_negative": MeanMetric(),
-                "loss_class": MeanMetric(),
-                "mAP": YoloMeanAveragePrecision(
-                    box_format="xyxy",
-                    max_detection_thresholds=[1, 4, 8],
-                ),
-            },
-            prefix="train/",
-        )
-        self.metrics_val = self.metrics_train.clone(prefix="val/")
+        metrics_dict = {
+            "loss": MeanMetric(),
+            "loss_coords": MeanMetric(),
+            "loss_confidence": MeanMetric(),
+            "loss_confidence_negative": MeanMetric(),
+            "loss_class": MeanMetric(),
+        }
+        self.metrics_train = MyMetricCollection(metrics_dict, prefix="train/")
+        metrics_dict['mAP'] = YoloMeanAveragePrecision()
+        self.metrics_val = MyMetricCollection(metrics_dict, prefix="val/")
 
     def forward(self, x):
         return self.yolo_v1(x)
@@ -102,18 +97,7 @@ class YoloV1PL(pl.LightningModule):
         losses = self.criterion(preds, targets, ious)
 
         # ----------- metrics and logs -------------
-        metric_args = {
-            "mAP": (
-                preds_denorm,
-                preds,
-                self.num_classes,
-                self.num_boxes,
-                targets_denorm,
-                targets,
-            ),
-            **losses,
-        }
-        self.metrics_train.update_each(metric_args)
+        self.metrics_train.update_each(losses)
         self.log("train/loss_step", losses["loss"].detach())
         if batch_index == 0:
             self._log_visualizations(
