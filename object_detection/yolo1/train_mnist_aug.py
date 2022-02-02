@@ -1,3 +1,4 @@
+from os import makedirs
 from os.path import join
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -10,6 +11,7 @@ from settings import BASE_DIR, device
 
 def train_mnist_aug_yolo1(hp, config):
     output_path = join(config["output_path"], config["project_name"])
+    makedirs(output_path, exist_ok=True)
     data_module = MnistAugDataModule(**config, **hp)
     model = YoloV1PL(**hp, **config).to(device).float()
     summary(
@@ -18,8 +20,9 @@ def train_mnist_aug_yolo1(hp, config):
     wandb_logger = WandbLogger(
         project=config["project_name"],
         log_model=False,
-        # save_dir=join(output_path, "_wandb_logs"),
+        dir=join(output_path, "wandb"),
         config={**hp, **config},
+        mode=config['wandb_mode'],
     )
     checkpoint_callback = ModelCheckpoint(
         monitor="val/loss",
@@ -57,8 +60,8 @@ if __name__ == "__main__":
         (3, 32, 1, 0),  # 7 -> 5
     ]
     hp = {
-        "epochs": 1,
-        "batch_size": 32,
+        "epochs": 2,
+        "batch_size": 2,
         "lr_initial": 0.0001,
         "lr_decay_every": 20,
         "lr_decay_by": 0.99,
@@ -74,8 +77,8 @@ if __name__ == "__main__":
     config = {
         "project_name": "mnist_detection_yolo1",
         "output_path": f"{BASE_DIR}/object_detection/yolo1/output",
-        "data_path_train": f"{BASE_DIR}/data/mnist_detection/sample/train",
-        "data_path_val": f"{BASE_DIR}/data/mnist_detection/sample/test",
+        "data_path_train": f"{BASE_DIR}/data/mnist_detection_10k/train",
+        "data_path_val": f"{BASE_DIR}/data/mnist_detection_10k/test",
         "in_channels": 1,
         "num_classes": 10,
         "image_height": 112,
@@ -85,5 +88,6 @@ if __name__ == "__main__":
         "dataloader_num_workers": 0,
         "num_gpus": 0,
         "architecture": architecture_config,
+        "wandb_mode": "disabled",
     }
     train_mnist_aug_yolo1(hp, config)

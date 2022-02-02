@@ -74,10 +74,15 @@ class YoloMeanAveragePrecision(MeanAveragePrecision):
         target_boxes = target_boxes.flatten(start_dim=2)  # shape (batch, 4, S*S)
         target_boxes = target_boxes.moveaxis(1, 2)  # shape (batch, S*S, 4)
 
-        target_classes = targets[:, : self.num_classes]  # shape (batch, C, S, S)
+        target_classes = targets[:, : num_classes]  # shape (batch, C, S, S)
         target_classes = target_classes.argmax(dim=1, keepdim=True)  # shape (batch, 1, S, S)
         target_classes = target_classes.flatten(start_dim=1)  # shape (batch, S*S)
-        # TODO: Filter these classes and target_boxes to only the "real" objects. Not the background ones.
+
+        # Filter these classes and target_boxes to only the "real" objects. Not the background ones.
+        boxes_exist = target_classes != 0  # (batch, S*S)
+        target_classes_exist = target_classes[boxes_exist]
+        boxes_exist_coords = target_boxes[boxes_exist]  # (n, 4). n = # of objects. 4 = coords. Batch index is missing.
+        boxes_indices = torch.nonzero(target_classes != 0)  # (n, 2). n = # of objects. 2 = batch_number, box_index.
 
         batch_size = len(pred_boxes)
 
@@ -92,8 +97,9 @@ class YoloMeanAveragePrecision(MeanAveragePrecision):
 
         targets_list = [
             dict(
-                boxes=target_boxes[i],
-                labels=target_classes[i],
+                # get the box coords where only certain indices belong to batch i
+                boxes=boxes_exist_coords[boxes_indices[:, 0] == i],
+                labels=target_classes_exist[boxes_indices[:, 0] == i],
             )
             for i in range(batch_size)
         ]

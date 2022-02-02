@@ -102,7 +102,17 @@ class YoloV1PL(pl.LightningModule):
         losses = self.criterion(preds, targets, ious)
 
         # ----------- metrics and logs -------------
-        metric_args = {"mAP": (preds_denorm, targets_denorm), **losses}
+        metric_args = {
+            "mAP": (
+                preds_denorm,
+                preds,
+                self.num_classes,
+                self.num_boxes,
+                targets_denorm,
+                targets,
+            ),
+            **losses,
+        }
         self.metrics_train.update_each(metric_args)
         self.log("train/loss_step", losses["loss"].detach())
         if batch_index == 0:
@@ -130,7 +140,17 @@ class YoloV1PL(pl.LightningModule):
 
         losses = self.criterion(preds, targets, ious)
 
-        metric_args = {"mAP": (preds_denorm, targets_denorm), **losses}
+        metric_args = {
+            "mAP": (
+                preds_denorm,
+                preds,
+                self.num_classes,
+                self.num_boxes,
+                targets_denorm,
+                targets,
+            ),
+            **losses,
+        }
         self.metrics_val.update_each(metric_args)
 
         return losses
