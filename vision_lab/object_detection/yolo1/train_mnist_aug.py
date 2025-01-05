@@ -1,4 +1,3 @@
-from os import makedirs
 from os.path import join
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -11,7 +10,6 @@ from settings import BASE_DIR, device
 
 def train_mnist_aug_yolo1(hp, config):
     output_path = join(config["output_path"], config["project_name"])
-    makedirs(output_path, exist_ok=True)
     data_module = MnistAugDataModule(**config, **hp)
     model = YoloV1PL(**hp, **config).to(device).float()
     summary(
