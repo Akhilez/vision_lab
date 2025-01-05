@@ -1,0 +1,17 @@
+[project]
+name = "vision-lab"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.0",
+    "opencv-python>=4.10.0.84",
+    "pandas>=2.2.3",
+    "torch>=2.5.1",
+    "torchsummary>=1.5.1",
+    "torchvision>=0.20.1",
+    "tqdm>=4.67.1",
+    "wandb>=0.19.1",
+]

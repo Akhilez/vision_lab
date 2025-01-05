@@ -17,6 +17,8 @@ outputs/
 output/
 multirun/
 wandb/
+checkpoints/
+*.pth
 
 temp.*
 
