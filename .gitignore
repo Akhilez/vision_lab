@@ -18,8 +18,12 @@ output/
 multirun/
 wandb/
 checkpoints/
+reconstructions/
 *.pth
 *.json
+*.jpg
+*.jpeg
+*.png
 
 temp.*
 
