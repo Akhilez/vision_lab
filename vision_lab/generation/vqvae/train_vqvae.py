@@ -1,5 +1,6 @@
 from os import makedirs
 from os.path import dirname, join, exists
+from shutil import rmtree
 
 import torch
 from torch import nn
@@ -8,37 +9,60 @@ from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
+from torch.utils.data import random_split
 from tqdm import tqdm
 
 
 PARENT_PATH = dirname(__file__)
 
 
+def grayscale_to_rgb(img):
+    return img.convert("RGB")
+
+
 def get_datasets():
-    training_data = datasets.CIFAR10(
+    # t = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    # training_data = datasets.CIFAR10(
+    #     root="data",
+    #     train=True,
+    #     download=True,
+    #     transform=t,
+    # )
+    #
+    # validation_data = datasets.CIFAR10(
+    #     root="data",
+    #     train=False,
+    #     download=True,
+    #     transform=t,
+    # )
+
+    t = transforms.Compose([
+        transforms.Lambda(grayscale_to_rgb),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    data = datasets.Caltech256(
         root="data",
-        train=True,
+        transform=t,
         download=True,
-        transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
     )
 
-    validation_data = datasets.CIFAR10(
-        root="data",
-        train=False,
-        download=True,
-        transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
-    )
+    # Set seed for reproducibility
+    torch.manual_seed(0)
+    training_data, validation_data = random_split(data, [len(data) - 1000, 1000])
+
     return training_data, validation_data
 
 
 class ResidualBlock(nn.Module):
-    def __init__(self):
+    def __init__(self, emb_size):
         super().__init__()
         self.block = nn.Sequential(
             nn.ReLU(),
-            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels=emb_size, out_channels=emb_size * 2, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=1, padding=0),
+            nn.Conv2d(in_channels=emb_size * 2, out_channels=emb_size, kernel_size=1, padding=0),
         )
 
     def forward(self, x):
@@ -46,15 +70,17 @@ class ResidualBlock(nn.Module):
 
 
 class VectorQuantizer(nn.Module):
-    def __init__(self):
+    def __init__(self, emb_size, num_embs):
         super().__init__()
-        self.embedding = nn.Embedding(num_embeddings=512, embedding_dim=256)
-        self.embedding.weight.data.uniform_(-1/512, 1/512)
+        self.emb_size = emb_size
+        self.num_embs = num_embs
+        self.embedding = nn.Embedding(num_embeddings=num_embs, embedding_dim=emb_size)
+        self.embedding.weight.data.uniform_(-1/num_embs, 1/num_embs)
 
     def forward(self, x):
         # x: (batch_size, channels, height, width)
         b, c, h, w = x.shape
-        assert c == 256, f"Expected 256 channels, got {c}"
+        assert c == self.emb_size, f"Expected {self.emb_size} channels, got {c}"
 
         # Permute x to (batch_size, height, width, channels)
         x = x.permute(0, 2, 3, 1)  # (batch_size, height, width, channels)
@@ -66,7 +92,7 @@ class VectorQuantizer(nn.Module):
 
         # Compute distances between x and embeddings
         distances = torch.cdist(x, self.embedding.weight)
-        assert distances.shape == (b * h * w, 512)
+        assert distances.shape == (b * h * w, self.num_embs)
 
         # Find the closest embedding for each pixel
         indices = torch.argmin(distances, dim=1)
@@ -88,33 +114,37 @@ class VectorQuantizer(nn.Module):
 
 
 class VQVAE(nn.Module):
-    def __init__(self):
+    def __init__(self, emb_size, num_emb):
         super().__init__()
         """
         2 strided conv layers with stride 2 and window size 4x4
         2 residual 3x3 blocks (ReLU, 3x3 conv, ReLU, 1x1 conv) all have 256 units.
         """
         self.encoder = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=256, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(in_channels=3, out_channels=emb_size, kernel_size=4, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=4, stride=2, padding=1),
-            ResidualBlock(),
-            ResidualBlock(),
+            nn.Conv2d(in_channels=emb_size, out_channels=emb_size, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=emb_size, out_channels=emb_size, kernel_size=4, stride=2, padding=1),
+            ResidualBlock(emb_size),
+            ResidualBlock(emb_size),
         )
 
-        self.quantizer = VectorQuantizer()
+        self.quantizer = VectorQuantizer(emb_size, num_embs=num_emb)
 
         """
         2 residual 3x3 blocks (ReLU, 3x3 conv, ReLU, 1x1 conv) all have 256 units.
         2 transposed conv with stride 2, window size 4x4
         """
         self.decoder = nn.Sequential(
-            ResidualBlock(),
-            ResidualBlock(),
+            ResidualBlock(emb_size),
+            ResidualBlock(emb_size),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels=256, out_channels=256, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(in_channels=emb_size, out_channels=emb_size, kernel_size=4, stride=2, padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels=256, out_channels=3, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(in_channels=emb_size, out_channels=emb_size, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(in_channels=emb_size, out_channels=3, kernel_size=4, stride=2, padding=1),
             nn.Tanh(),
         )
 
@@ -137,20 +167,49 @@ class VQVAE(nn.Module):
         return x, (loss_reconstruction, loss_discrete, loss_commitment), indices
 
 
+def evaluate(val_loader, model, device, epoch, num_emb):
+    # Evaluate one batch of validation data
+    x, _ = next(iter(val_loader))
+    x = x.to(device)
+    model.eval()
+    with torch.inference_mode():
+        x_hat, losses, indices = model(x)
+    loss_reconstruction, loss_discrete, loss_commitment = losses
+    loss = loss_reconstruction + loss_discrete + 0.25 * loss_commitment
+    indices_one_hot = F.one_hot(indices, num_classes=num_emb)
+    probabilities = indices_one_hot.float().mean(dim=0)
+    entropy = -(probabilities * torch.log(probabilities + 1e-8)).sum()
+    print(f"Validation loss: {loss.item()}, validation entropy: {entropy.item()}")
+    # Save the first 25 reconstructed images
+    save_path = join(PARENT_PATH, "reconstructions", f"epoch_{epoch}")
+    makedirs(save_path, exist_ok=True)
+    for i in range(25):
+        save_image((x_hat[i] + 1) / 2, join(save_path, f"reconstruction_{i}.jpg"))
+    original_path = join(PARENT_PATH, "originals")
+    if epoch == -1:
+        rmtree(original_path)
+        makedirs(original_path, exist_ok=True)
+        for i in range(25):
+            save_image((x[i] + 1) / 2, join(original_path, f"original_{i}.jpg"))
+
+
 def train():
-    batch_size = 1024
+    batch_size = 256
     max_steps = 250_000
     dataloader_workers = 4
-    lr = 2e-4
-    # device = "cuda:0"
-    device = "mps"
+    lr = 1e-3
+    device = "cuda:0" if torch.cuda.is_available() else "mps"
+    embedding_size = 32
+    num_emb = 512
 
     training_data, validation_data = get_datasets()
     train_loader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=dataloader_workers)
     val_loader = DataLoader(validation_data, batch_size=batch_size, shuffle=False, num_workers=dataloader_workers)
 
-    model = VQVAE().to(device)
+    model = VQVAE(embedding_size, num_emb).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    evaluate(val_loader, model, device, epoch=-1, num_emb=num_emb)
 
     step = 0
     epoch = 0
@@ -168,7 +227,7 @@ def train():
             optimizer.step()
 
             loss_agg += loss.item()
-            indices_one_hot = F.one_hot(indices, num_classes=512)  # (batch_size * height * width, 512)
+            indices_one_hot = F.one_hot(indices, num_classes=num_emb)  # (batch_size * height * width, num_emb)
             probabilities = indices_one_hot.float().mean(dim=0)
             entropy = -(probabilities * torch.log(probabilities + 1e-8)).sum()
             entropy_agg += entropy.item()
@@ -178,28 +237,11 @@ def train():
                 break
         print(f"Epoch: {epoch}, global step {step}, loss: {loss_agg / len(train_loader)}, entropy: {entropy_agg / len(train_loader)}")
 
-        # Evaluate one batch of validation data
-        x, _ = next(iter(val_loader))
-        x = x.to(device)
-        model.eval()
-        with torch.inference_mode():
-            x_hat, losses, indices = model(x)
-        loss_reconstruction, loss_discrete, loss_commitment = losses
-        loss = loss_reconstruction + loss_discrete + 0.25 * loss_commitment
-        indices_one_hot = F.one_hot(indices, num_classes=512)
-        probabilities = indices_one_hot.float().mean(dim=0)
-        entropy = -(probabilities * torch.log(probabilities + 1e-8)).sum()
-        print(f"Validation loss: {loss.item()}, validation entropy: {entropy.item()}")
-        # Save the first 25 reconstructed images
-        save_path = join(PARENT_PATH, "reconstructions", f"epoch_{epoch}")
-        makedirs(save_path, exist_ok=True)
-        for i in range(25):
-            save_image(x_hat[i], join(save_path, f"reconstruction_{i}.jpg"))
-        original_path = join(PARENT_PATH, "originals")
-        if not exists(original_path):
-            makedirs(original_path, exist_ok=True)
-            for i in range(25):
-                save_image(x[i], join(original_path, f"original_{i}.jpg"))
+        if epoch % 5 == 0 or step >= max_steps - 1:
+            evaluate(val_loader, model, device, epoch, num_emb)
+            checkpoints_path = join(PARENT_PATH, "checkpoints")
+            makedirs(checkpoints_path, exist_ok=True)
+            torch.save(model.state_dict(), join(checkpoints_path, f"model_{step}.pt"))
 
         epoch += 1
 
@@ -214,7 +256,10 @@ def test_interface():
     print(f"Label: {y}")
     print(f"Image min: {x.min()}, max: {x.max()}, mean: {x.mean()}, std: {x.std()}")
 
-    model = VQVAE()
+    embedding_size = 64
+    num_emb = 1024
+
+    model = VQVAE(embedding_size, num_emb)
     x_hat, losses, indices = model(x.unsqueeze(0))
     print(f"Reconstruction shape: {x_hat.shape}")
     print(f"Reconstruction min: {x_hat.min()}, max: {x_hat.max()}, mean: {x_hat.mean()}, std: {x_hat.std()}")
@@ -222,8 +267,8 @@ def test_interface():
     print(f"Indices shape: {indices.shape}")
     print(f"Indices: {indices}")
 
-    indices_one_hot = F.one_hot(indices, num_classes=512)  # (batch_size * height * width, 512)
-    probabilities = indices_one_hot.float().mean(dim=0)  # (512,)
+    indices_one_hot = F.one_hot(indices, num_classes=num_emb)  # (batch_size * height * width, num_emb)
+    probabilities = indices_one_hot.float().mean(dim=0)  # (num_emb,)
     entropy = -(probabilities * torch.log(probabilities + 1e-8)).sum()
     print(f"Entropy: {entropy}")
 
