@@ -11,8 +11,13 @@ dependencies = [
     "opencv-python>=4.10.0.84",
     "pandas>=2.2.3",
     "torch>=2.5.1",
+    "torchmetrics>=1.6.1",
     "torchsummary>=1.5.1",
     "torchvision>=0.20.1",
     "tqdm>=4.67.1",
     "wandb>=0.19.1",
 ]
+
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"

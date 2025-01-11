@@ -1,5 +1,5 @@
 from os import makedirs
-from os.path import dirname, join, exists
+from os.path import dirname, join
 from shutil import rmtree
 
 import torch
