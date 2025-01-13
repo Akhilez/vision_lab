@@ -148,7 +148,7 @@ def train():
         criterion = nn.BCELoss()
     else:
         criterion = nn.CrossEntropyLoss()
-    accuracy = Accuracy("multilabel" if train_bits else "multiclass", num_classes=n_classes, num_labels=d).to(device)
+    accuracy = Accuracy("multiclass", num_classes=n_classes).to(device)
 
     for epoch in range(epochs):
         loss_agg = 0.0
