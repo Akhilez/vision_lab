@@ -11,6 +11,7 @@ from torchvision import transforms
 from tqdm import tqdm
 from torchsummary import summary
 
+from vision_lab.generation.diffusion.mnist_diffusion.unet import UNet
 from vision_lab.settings import DATA_DIR
 
 warnings.filterwarnings("ignore")
@@ -120,9 +121,11 @@ class SqueezeDiffusionModel(nn.Sequential):
 class SimpleMnistDiffusionModel(nn.Module):
     def __init__(self):
         super().__init__()
-        w = 512
+        w = 256
         self.model = nn.Sequential(
             nn.Linear(785, w),
+            nn.ReLU(),
+            nn.Linear(w, w),
             nn.ReLU(),
             nn.Linear(w, w),
             nn.ReLU(),
@@ -155,7 +158,7 @@ def sample_one(model, diffuser: DiffusionProcessor, image: torch.tensor):
 
 
 def train():
-    lr = 1e-3
+    lr = 1e-4
     batch_size = 1024
     dataloader_workers = 4
     device = "cuda:1" if torch.cuda.is_available() else "mps"
@@ -164,14 +167,16 @@ def train():
     dataset = MnistDiffusionDataset(DATA_DIR, diffuser)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=dataloader_workers)
 
-    # model = SimpleMnistDiffusionModel()
-    model = SqueezeDiffusionModel(in_channels=2, w=64, depth=7, out_channels=1).to(device)
+    # model = SimpleMnistDiffusionModel().to(device)
+    # model = SqueezeDiffusionModel(in_channels=2, w=64, depth=7, out_channels=1).to(device)
+    model = UNet(in_channels=2, out_channels=1, depth=4, initial_filters=16).to(device)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    for epoch in range(200):
-        generated = sample_one(model, diffuser, torch.randn(1, 28, 28).to(device))
-        save_image(generated, f"{PARENT_DIR}/generated/generated_{epoch - 1}.png")
+    for epoch in range(1000):
+        if epoch % 10 == 0:
+            generated = sample_one(model, diffuser, torch.randn(1, 28, 28).to(device))
+            save_image(generated, f"{PARENT_DIR}/generated/generated_{epoch - 1}.png")
 
         loss_agg = 0.0
         model.train()
@@ -210,14 +215,18 @@ def test_mnist_diffusion_dataset():
 
     print("t = ", t)
 
-    model = SqueezeDiffusionModel(in_channels=1, w=64, depth=3, out_channels=1).to(torch.float)
+    # model = SqueezeDiffusionModel(in_channels=2, w=64, depth=7, out_channels=1).to(torch.float)
+    # model = SimpleMnistDiffusionModel().to(torch.float)
+    model = UNet(in_channels=2, out_channels=1, depth=4, initial_filters=16).to(torch.float)
 
-    summary(model, input_image.shape, device="cpu")
+    inputs = model.encode_t(input_image.unsqueeze(0), torch.tensor(t).view(1, 1)).float()
 
-    x = model(input_image.unsqueeze(0))
+    summary(model, inputs[0].shape, device="cpu")
+
+    x = model(inputs)
     print(x.shape)
 
 
 if __name__ == "__main__":
-    # test_mnist_diffusion_dataset()
+    test_mnist_diffusion_dataset()
     train()
