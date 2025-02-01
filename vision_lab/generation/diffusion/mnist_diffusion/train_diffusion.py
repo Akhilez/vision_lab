@@ -1,4 +1,5 @@
 import warnings
+from os.path import dirname, abspath
 
 import cv2
 import numpy as np
@@ -8,47 +9,65 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import MNIST
 from torchvision import transforms
 from tqdm import tqdm
+from torchsummary import summary
+
+from vision_lab.settings import DATA_DIR
 
 warnings.filterwarnings("ignore")
 
+PARENT_DIR = dirname(abspath(__file__))
+
 
 def save_image(image, path):
-    image = np.transpose(image, (1, 2, 0))
-    # [-1, 1] -> [0, 255]
-    image = (image + 1) * 127.5
-    image = image.astype(np.uint8)
+    # image: (C, H, W)
+    image = image.detach().cpu().numpy()
+    image = np.transpose(image, (1, 2, 0))  # (C, H, W) -> (H, W, C)
+    image = image - image.min()
+    image = image / image.max()
+    image = (image * 255).astype(np.uint8)
+    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     cv2.imwrite(path, image)
 
 
 class DiffusionProcessor:
-    def __init__(self, T: int):
-        self.T = T
-        self.ts = np.arange(0, T)
-        extreme = 0.001
-        self.b = np.linspace(extreme, 1 - extreme, T)
+    def __init__(self):
+        self.T = 100
+        self.b = np.linspace(0.001, 0.1, self.T)
         self.a = 1 - self.b
         self.a_bar = np.cumprod(self.a)
 
-    def get_inputs_and_outputs(self, image: np.ndarray, t: int):
-        noise1 = np.random.randn(*image.shape).astype(np.float32)
-        noise2 = np.random.randn(*image.shape).astype(np.float32)
+        self.a_sqrt = np.sqrt(self.a)
+        self.b_sqrt = np.sqrt(self.b)
+        self.a_bar_sqrt = np.sqrt(self.a_bar)
+        self.one_minus_a_bar_sqrt = np.sqrt(1 - self.a_bar)
 
-        # image_t_prev = a_bar[t-1] * image + (1 - a_bar[t-1]) * noise1
-        target_image = self.a_bar[t] / self.a[t] * image + (1 - self.a_bar[t] / self.a[t]) * noise1
-        input_image = self.a[t] * target_image + self.b[t] * noise2
-        # image_t = a_bar[t] * image + (a[t] - a_bar[t]) * noise1 + (1 - a[t]) * noise2
+    def get_inputs_and_outputs(self, image: np.ndarray, t: int | float):
+        if type(t) is float:
+            assert 0 <= t <= 1
+            t = int(t * self.T)
+            assert 0 <= t < self.T
 
-        return input_image, noise2, target_image
+        noise = np.random.randn(*image.shape).astype(np.float32)
+        image_t = self.a_bar_sqrt[t] * image + self.one_minus_a_bar_sqrt[t] * noise
 
-    def backward(self, image: np.ndarray, noise: np.ndarray, t: int):
-        return 1 / self.a[t] * (image - self.b[t] * noise)
+        return image_t, noise
+
+    def backward(self, image: torch.tensor, noise: torch.tensor, t: int | float):
+        if type(t) is float:
+            assert 0 <= t <= 1
+            t = int(t * self.T)
+            assert 0 <= t < self.T
+
+        image_prev = (image - self.b_sqrt[t] * noise) / self.a_sqrt[t]
+
+        return image_prev
 
 
 class MnistDiffusionDataset(Dataset):
-    def __init__(self, path: str, T: int, is_train: bool = True):
+    def __init__(self, path: str, diffuser: DiffusionProcessor, is_train: bool = True):
         super().__init__()
         self.path = path
-        self.T = T
+        self.diffuser = diffuser
         self.is_train = is_train
 
         self.mnist_raw = MNIST(path, train=is_train, download=True, transform=transforms.Compose([
@@ -59,103 +78,129 @@ class MnistDiffusionDataset(Dataset):
             # transforms.Lambda(lambda x: x.view(-1)),
         ]))
 
-        self.diffuser = DiffusionProcessor(T)
-
     def __len__(self):
         return len(self.mnist_raw)
 
     def __getitem__(self, idx):
         image = self.mnist_raw[idx][0]
-        t = int(np.random.randint(0, self.T-1, 1)[0])
+        t = np.random.rand()
 
-        input_image, label, target_image = self.diffuser.get_inputs_and_outputs(image, t)
+        input_image, label = self.diffuser.get_inputs_and_outputs(image, t)
 
-        return input_image, t/self.T, label, target_image
+        return input_image, t, label
+
+
+class SqueezeBlock(nn.Sequential):
+    def __init__(self, in_channels, out_channels):
+        super().__init__(
+            nn.Conv2d(in_channels, out_channels * 4, kernel_size=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(out_channels * 4, out_channels, kernel_size=3, padding=1),
+        )
+
+
+class SqueezeDiffusionModel(nn.Sequential):
+    def __init__(self, in_channels=3, w=64, depth=3, out_channels=3):
+        hidden_blocks = [SqueezeBlock(w, w) for _ in range(depth)]
+        super().__init__(
+            SqueezeBlock(in_channels, w),
+            *hidden_blocks,
+            nn.Conv2d(w, out_channels, kernel_size=3, padding=1),
+        )
+
+    @classmethod
+    def encode_t(cls, x, t):
+        # x: (B, C, H, W)
+        # t: (B, 1)
+        # output: (B, C+1, H, W)
+        t = t.view(-1, 1, 1, 1).expand(-1, 1, x.shape[2], x.shape[3])
+        return torch.cat([x, t], dim=1)
 
 
 class SimpleMnistDiffusionModel(nn.Module):
     def __init__(self):
         super().__init__()
+        w = 512
         self.model = nn.Sequential(
-            nn.Linear(785, 256),
+            nn.Linear(785, w),
             nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(w, w),
             nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 784),
+            nn.Linear(w, 784),
         )
 
     def forward(self, x):
-        return self.model(x)
+        # x: (B, 785)
+        # output: (B, 1, 28, 28)
+        y = self.model(x)
+        return y.view(-1, 1, 28, 28)
+
+    @classmethod
+    def encode_t(cls, x, t):
+        # x: (B, C, H, W)
+        # t: (B, 1)
+        # output: (B, C*H*W + 1)
+        return torch.cat([x.view(x.shape[0], -1), t], dim=1)
 
 
-def sample_one(model, diffuser):
-    image = torch.randn(1, 784)
+def sample_one(model, diffuser: DiffusionProcessor, image: torch.tensor):
+    # image: (C, H, W)
     model.eval()
     with torch.no_grad():
-        for t in range(diffuser.T-1, 0, -1):
-            inputs = torch.cat([image, torch.tensor([[t/diffuser.T]])], dim=1).float()
+        for t in torch.arange(diffuser.T-1, -1, -1):
+            inputs = model.encode_t(image.unsqueeze(0), t.view(1, 1).to(image.device))
             noise = model(inputs)
-            image = diffuser.backward(image, noise, t)
-            if torch.any(torch.isnan(image)):
-                print("Image is NaN")
-                return None
-    image = image.view(1, 28, 28)
+            image = diffuser.backward(image, noise[0], int(t))
     return image
 
 
 def train():
-    path = "/Users/akhildevarashetti/code/vision_lab/data"
-    T = 100
     lr = 1e-3
-    # dataloader_workers = 4
+    batch_size = 1024
+    dataloader_workers = 4
+    device = "cuda:1" if torch.cuda.is_available() else "mps"
 
-    dataset = MnistDiffusionDataset(path, T)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)  #, num_workers=dataloader_workers)
+    diffuser = DiffusionProcessor()
+    dataset = MnistDiffusionDataset(DATA_DIR, diffuser)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=dataloader_workers)
 
-    model = SimpleMnistDiffusionModel()
+    # model = SimpleMnistDiffusionModel()
+    model = SqueezeDiffusionModel(in_channels=2, w=64, depth=7, out_channels=1).to(device)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    for epoch in range(10):
+    for epoch in range(200):
+        generated = sample_one(model, diffuser, torch.randn(1, 28, 28).to(device))
+        save_image(generated, f"{PARENT_DIR}/generated/generated_{epoch - 1}.png")
+
         loss_agg = 0.0
-        for input_image, t, label, target_image in tqdm(dataloader):
+        model.train()
+        for input_image, t, label in tqdm(dataloader):
             b, c, h, w = input_image.shape
-            inputs = torch.cat([input_image.view(b, -1), t.view(b, 1)], dim=1).float()
-            target_image = target_image.view(b, -1).float()
+
+            t = t.view(b, 1).float().to(device)
+            inputs = input_image.float().to(device)
+            inputs = model.encode_t(inputs, t)
+            label = label.float().to(device)
 
             output = model(inputs)
-            loss = criterion(output, target_image)
-
-            if torch.any(torch.isnan(loss)):
-                print("Loss is NaN")
-                break
+            loss = criterion(output, label)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
             loss_agg += loss.item()
 
-        print(f"{epoch=} loss: {loss_agg}")
-        generated = sample_one(model, dataset.diffuser)
-        if generated is not None:
-            save_image(generated, f"/Users/akhildevarashetti/code/vision_lab/vision_lab/generation/diffusion/mnist_diffusion/generated/generated_{epoch}.png")
+        print(f"{epoch=} loss: {loss_agg / len(dataloader)}")
 
 
 def test_mnist_diffusion_dataset():
-    path = "/Users/akhildevarashetti/code/vision_lab/data"
-    T = 10
+    dataset = MnistDiffusionDataset(DATA_DIR, DiffusionProcessor())
 
-    dataset = MnistDiffusionDataset(path, T)
-
-    input_image, t, label, target_image = dataset[0]
+    input_image, t, label = dataset[0]
 
     x = input_image
-    print(x.shape)
-    print(f"{x.min()=} {x.max()=} {x.mean()=} {x.std()=}")
-
-    x = target_image
     print(x.shape)
     print(f"{x.min()=} {x.max()=} {x.mean()=} {x.std()=}")
 
@@ -163,7 +208,14 @@ def test_mnist_diffusion_dataset():
     print(x.shape)
     print(f"{x.min()=} {x.max()=} {x.mean()=} {x.std()=}")
 
-    print(t)
+    print("t = ", t)
+
+    model = SqueezeDiffusionModel(in_channels=1, w=64, depth=3, out_channels=1).to(torch.float)
+
+    summary(model, input_image.shape, device="cpu")
+
+    x = model(input_image.unsqueeze(0))
+    print(x.shape)
 
 
 if __name__ == "__main__":
